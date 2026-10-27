@@ -12,89 +12,102 @@ proposed **MobileNetV3** so the two can be compared on accuracy and speed.
 Image → preprocess & augment → MobileNetV3 (transfer learning) → Fresh/Rotten + confidence
 ```
 
+### 🔗 Live app
+**https://fresh-vs-rotten-frayru3aapjtqmoieynnf3.streamlit.app/**
+(deployed on Streamlit Community Cloud)
+
+---
+
+## Results (test set)
+
+| Metric | Baseline CNN | **MobileNetV3** |
+|---|---|---|
+| Accuracy | 0.803 | **0.964** |
+| Precision (macro) | 0.855 | **0.966** |
+| Recall (macro) | 0.803 | **0.964** |
+| F1 (macro) | 0.807 | **0.964** |
+| Inference latency | 28.4 ms | **12.6 ms** |
+| Throughput | 35.3 FPS | **79.4 FPS** |
+
+MobileNetV3 is both **more accurate (+16 pts)** and **~2× faster** — exactly the
+trade-off argued in the proposal. Full per-class numbers and confusion matrices
+are in [`reports/RESULTS.md`](reports/RESULTS.md) and
+[`reports/confusion_matrices.png`](reports/confusion_matrices.png).
+
+---
+
+## How it was actually built
+
+**Dataset (no Kaggle login needed).** The classic Kaggle set requires an API
+token, so instead we pulled the 6 target classes directly from the larger
+`Densu341/Fresh-rotten-fruit` mirror on the Hugging Face Hub — reading the
+archive's directory remotely and fetching only our classes via HTTP range
+requests (see [`src/prep_data.py`](src/prep_data.py)). Result: a balanced
+**2,400 images (400/class)**.
+
+**Training (local CPU).** Both models trained with a stratified **70 / 15 / 15**
+split, Adam + Cross-Entropy, light augmentation (crop, rotation, brightness).
+The deployed model is **MobileNetV3-small @ 128px** (chosen for fast CPU/free-tier
+inference). See [`src/train.py`](src/train.py). A full-size GPU run
+(MobileNetV3-large @ 224px) is available via the Colab notebook below.
+
+**App.** A Streamlit app ([`app/app.py`](app/app.py)) with image upload **and**
+webcam capture, showing predicted class, confidence, per-class probability bars,
+and inference latency.
+
+**Deployment.** Hosted free on **Streamlit Community Cloud** from this GitHub
+repo. (Note: Hugging Face Spaces now requires a PRO subscription to run
+server-based Gradio/Docker apps, so Streamlit Cloud was used instead.)
+
+---
+
 ## Project layout
 
 ```
 fresh-vs-rotten/
-├── notebooks/
-│   └── Fresh_vs_Rotten_Training.ipynb   # ← train here (Google Colab, free GPU)
-├── app/                                 # ← Streamlit app = the Hugging Face Space
-│   ├── app.py                           #    upload + webcam + confidence UI
-│   ├── model_utils.py                   #    model load + inference
-│   ├── requirements.txt
-│   ├── README.md                        #    HF Space config (YAML header)
-│   └── models/                          #    trained weights go here
-├── reports/                             # confusion matrices, metrics (from Colab)
-└── README.md                            # this file
+├── notebooks/Fresh_vs_Rotten_Training.ipynb   # full-size GPU run (Colab)
+├── src/prep_data.py                           # dataset builder (HF Hub, no Kaggle login)
+├── src/train.py                               # local training: baseline CNN + MobileNetV3
+├── app/app.py                                 # Streamlit app (upload + webcam + confidence)
+├── app/model_utils.py                         # model load + inference
+├── app/models/                                # trained weights + labels.json
+├── reports/                                   # metrics.json, RESULTS.md, confusion matrices
+├── deploy_to_hf.py                            # optional Hugging Face deploy helper
+└── requirements.txt                           # app + training deps (CPU PyTorch)
 ```
 
 ---
 
-## Pipeline: Train → Test → Validate
+## Reproduce locally
 
-### 1. Train & test (Google Colab — needs your Kaggle token)
-1. Open `notebooks/Fresh_vs_Rotten_Training.ipynb` in Google Colab
-   (colab.research.google.com → File → Upload notebook).
-2. `Runtime → Change runtime type → T4 GPU`.
-3. **Kaggle token:** kaggle.com → Settings → API → *Create New Token* → saves
-   `kaggle.json`. Run the download cell and upload that file when prompted.
-4. Run all cells. The notebook will:
-   - download the Kaggle dataset (~13.6k images, 6 classes);
-   - make a stratified **70 / 15 / 15** train/val/test split;
-   - augment (crop, rotation, brightness), train the **baseline CNN** and
-     **MobileNetV3**, and evaluate both on the test set;
-   - report accuracy, precision, recall, F1, per-class scores, confusion
-     matrices, and **inference latency + FPS**;
-   - save and download `artifacts.zip`.
-5. Unzip `artifacts.zip` and copy **`mobilenetv3_fresh_rotten.pt`** and
-   **`labels.json`** into `app/models/`. Put `confusion_matrices.png` and
-   `metrics.json` in `reports/` for the write-up.
-
-### 2. Run the app locally (this PC)
 ```bash
-cd fresh-vs-rotten/app
-python -m venv .venv && .venv\Scripts\activate      # Windows PowerShell
+# 1. install deps
 pip install -r requirements.txt
-streamlit run app.py
+
+# 2. (re)build the dataset — downloads only the 6 classes, ~2400 images
+python src/prep_data.py --per-class 400
+
+# 3. train both models + evaluate (writes app/models/ and reports/)
+python src/train.py --arch mobilenet_v3_small --img 128 --cnn-epochs 4 --mnet-epochs 4
+
+# 4. run the app
+python -m streamlit run app/app.py
 ```
-Open the URL it prints. Upload a fruit photo or use the webcam tab; the app
-shows the predicted class, confidence, full probability bars, and latency/FPS.
 
-### 3. Validate on your own fruit (your team's physical task)
+For higher final numbers, run `notebooks/Fresh_vs_Rotten_Training.ipynb` in
+Google Colab on a GPU (MobileNetV3-large @ 224px) and copy the resulting
+`mobilenetv3_fresh_rotten.pt` + `labels.json` into `app/models/`.
+
+---
+
+## Validate on your own fruit (report task)
 Photograph fresh fruit, then the same fruit as it naturally overripens over a
-few days (follow the safe-handling/disposal note in the proposal). Run those
-photos through the app (or the notebook's eval cell) to measure real-world
-accuracy and collect failure cases for the report.
-
----
-
-## Deploy to Hugging Face Spaces (free)
-
-> Resource gate: this needs a **free Hugging Face account** — tell me when it's
-> created and I'll walk the exact commands.
-
-1. Create an account at huggingface.co, then a new **Space**:
-   New → Space → SDK **Streamlit** → name it (e.g. `fresh-vs-rotten`).
-2. The Space is a git repo. Push the **contents of `app/`** (not the folder) to
-   its root — `app.py`, `model_utils.py`, `requirements.txt`, `README.md`, and
-   `models/mobilenetv3_fresh_rotten.pt` + `models/labels.json`:
-   ```bash
-   git clone https://huggingface.co/spaces/<user>/fresh-vs-rotten
-   cp -r app/* fresh-vs-rotten/        # copy app contents into the clone
-   cd fresh-vs-rotten
-   git add . && git commit -m "Deploy fresh-vs-rotten classifier"
-   git push
-   ```
-   (The `.pt` file is a few MB — fine for a normal git push. If git complains
-   about size, enable Git LFS for `*.pt`.)
-3. The Space builds and goes live at
-   `https://huggingface.co/spaces/<user>/fresh-vs-rotten`.
-
----
+few days (with safe handling/disposal), and run those photos through the app to
+measure real-world accuracy and collect failure cases.
 
 ## Model & evaluation notes
 - **Baseline:** 4-block custom CNN trained from scratch.
-- **Proposed:** MobileNetV3-Large, ImageNet-pretrained, fine-tuned with a
-  6-class head; Adam + Cross-Entropy, as specified in the proposal.
-- **Metrics reported for both:** accuracy, macro precision/recall/F1, per-class
-  report, confusion matrix, single-image latency (ms) and FPS.
+- **Proposed:** MobileNetV3, ImageNet-pretrained, fine-tuned with a 6-class head;
+  Adam + Cross-Entropy.
+- **Metrics for both:** accuracy, macro precision/recall/F1, per-class report,
+  confusion matrix, single-image latency (ms) and FPS.
