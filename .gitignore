@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+*.zip
+proposal_text.txt
+# downloaded training images — not needed in the repo (regenerate via src/prep_data.py)
+data/
+# keep the trained model (app/models/*.pt) — the app needs it
